@@ -161,23 +161,28 @@ You have received scores and reasoning from one or more evaluators for each
 criterion.
 
 For each criterion, report:
-- The three individual scores
-- The minimum score across the three evaluators
+- The individual scores from each evaluator
+- The minimum score across all evaluators
 - A one-sentence synthesis of the most important criticism raised
 
 Use the minimum score as the official score for that criterion. A criterion
 passes only when all three evaluators agree it passes.
 
-Then calculate the total using the minimum scores.
+Format your response in exactly this order:
 
-Format your response as a clean table followed by the total and one paragraph
-summarizing the most important weaknesses the three evaluators identified.
+1. TOTAL line first — before anything else:
+TOTAL: [sum of minimum scores]/[maximum possible score]
 
-After the paragraph, for every criterion with a minimum score of 1 or 2, add a
-FIX block in exactly this format:
+2. A clean per-criterion table with columns: Criterion | (one column per evaluator) | Min | Synthesis
+
+3. One paragraph summarizing the most important weaknesses the evaluators identified.
+
+4. For every criterion with a minimum score of 1 or 2, a FIX block in exactly this format:
 FIX Criterion [n]: [quote the specific phrase or sentence from the page that best
 illustrates the failure] → [what it should say or do instead, drawing on the
-evaluators' FIX suggestions]"""
+evaluators' FIX suggestions]
+
+Output the TOTAL line first. This is critical — it must appear before the table."""
 
 EVALUATOR_USER = """CONTENT CRITERIA:
 {criteria}
