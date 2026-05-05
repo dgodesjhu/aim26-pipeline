@@ -428,20 +428,66 @@ def run_evaluation(
         )
         synthesis_text = _text(synthesis_response)
 
+    parsed_score = _parse_score(synthesis_text)
+    if parsed_score is not None:
+        total_score = parsed_score
+        parse_method = "text"
+    else:
+        total_score = _sum_min_scores(evaluations)
+        parse_method = "fallback_sum" if total_score is not None else "failed"
+
     return {
         "evaluations": evaluations,
         "synthesis": synthesis_text,
-        "total_score": _parse_score(synthesis_text),
+        "total_score": total_score,
         "max_score": max_score,
+        "score_parse_method": parse_method,
     }
 
 
 def _parse_score(evaluation_text: str) -> Optional[int]:
-    """Extract the numeric total from 'TOTAL: X/Y' line."""
-    match = re.search(r"TOTAL:\s*(\d+)/\d+", evaluation_text, re.IGNORECASE)
-    if match:
-        return int(match.group(1))
+    """
+    Extract numeric total from synthesis text, trying multiple formats in order:
+    1. TOTAL: X/Y
+    2. Total score: X
+    3. X out of Y
+    4. X/Y on a line by itself
+    Returns None if all patterns fail.
+    """
+    # Pattern 1: TOTAL: X/Y  (original)
+    m = re.search(r"TOTAL:\s*(\d+)/\d+", evaluation_text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    # Pattern 2: Total score: X
+    m = re.search(r"total\s+score[:\s]+(\d+)", evaluation_text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    # Pattern 3: X out of Y
+    m = re.search(r"\b(\d+)\s+out\s+of\s+\d+", evaluation_text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    # Pattern 4: bare X/Y on its own line
+    m = re.search(r"^\s*(\d+)/(\d+)\s*$", evaluation_text, re.MULTILINE)
+    if m:
+        return int(m.group(1))
     return None
+
+
+def _sum_min_scores(evaluations: list[tuple[str, str]]) -> Optional[int]:
+    """
+    Fallback scorer: for each criterion, take the minimum score across all
+    evaluators and sum them. Reliable when the synthesis total cannot be parsed.
+    """
+    from collections import defaultdict
+    criterion_scores: dict[int, list[int]] = defaultdict(list)
+    for _, eval_text in evaluations:
+        for row in parse_evaluation_rows(eval_text):
+            cnum = int(row["Criterion"])
+            score = int(row["Score"].split("/")[0])
+            criterion_scores[cnum].append(score)
+    if not criterion_scores:
+        return None
+    return sum(min(scores) for scores in criterion_scores.values())
 
 
 def parse_evaluation_rows(evaluation_text: str) -> list[dict]:

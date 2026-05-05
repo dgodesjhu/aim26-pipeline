@@ -404,6 +404,11 @@ if run_button:
         if synthesis:
             st.markdown("**Synthesis — minimum scores across all three evaluators**")
             st.markdown(synthesis)
+            parse_method = eval_result.get("score_parse_method", "")
+            if parse_method == "fallback_sum":
+                st.info("Score extracted using fallback: summed minimum scores from individual evaluator texts (synthesis total line was unparseable).")
+            with st.expander("Debug — raw synthesis text", expanded=False):
+                st.text(synthesis)
         if score is None:
             st.warning(
                 "Could not parse total score from synthesis. "
