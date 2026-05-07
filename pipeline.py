@@ -19,6 +19,18 @@ from screener import is_editorial_by_url
 
 MODEL = "claude-sonnet-4-6"
 
+_MAX_RETRIES = 3
+_RETRY_DELAY = 10
+
+# Optional callback invoked on each overload retry: fn(attempt: int) -> None.
+# Set via set_retry_callback() before running the pipeline.
+_retry_callback = None
+
+
+def set_retry_callback(fn) -> None:
+    global _retry_callback
+    _retry_callback = fn
+
 
 def _call_claude(
     client: anthropic.Anthropic,
@@ -29,12 +41,12 @@ def _call_claude(
     messages: list | None = None,
 ) -> anthropic.types.Message:
     """
-    Claude API call with retry on timeout, updating stats in place.
-    Pass `messages` to use a custom multi-turn history; otherwise a single
-    user turn is constructed from `user`.
+    Claude API call with retry on 529 overloaded and timeout errors.
+    Retries up to _MAX_RETRIES times with _RETRY_DELAY seconds between attempts.
+    Calls _retry_callback(attempt) on each overload retry if one is registered.
     """
     msg_list = messages if messages is not None else [{"role": "user", "content": user}]
-    for attempt in range(2):
+    for attempt in range(1, _MAX_RETRIES + 1):
         try:
             response = client.messages.create(
                 model=MODEL,
@@ -46,9 +58,21 @@ def _call_claude(
             stats["total_output_tokens"] += response.usage.output_tokens
             stats["total_api_calls"] += 1
             return response
+        except anthropic.APIStatusError as exc:
+            if exc.status_code == 529 and attempt < _MAX_RETRIES:
+                if _retry_callback:
+                    _retry_callback(attempt)
+                time.sleep(_RETRY_DELAY)
+                continue
+            if exc.status_code == 529:
+                raise RuntimeError(
+                    f"API overloaded after {_MAX_RETRIES} retries. "
+                    "Please wait a moment and try again."
+                ) from exc
+            raise
         except anthropic.APITimeoutError:
-            if attempt == 0:
-                time.sleep(10)
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY)
                 continue
             raise
     raise RuntimeError("Unexpected exit from retry loop")
@@ -361,84 +385,38 @@ def run_html_generation(
 
 # ── Step 4 ─────────────────────────────────────────────────────────────────────
 
-_EVALUATOR_SPECS = [
-    ("Conversion Rate Optimizer", prompts.EVALUATOR_1_SYSTEM),
-    ("Target Reader",             prompts.EVALUATOR_2_SYSTEM),
-    ("Brand Voice Auditor",       prompts.EVALUATOR_3_SYSTEM),
-]
-
-
 def run_evaluation(
     client: anthropic.Anthropic,
     html_content: str,
     criteria: list[str],
     stats: dict,
     on_progress=None,
-    evaluator_indices: list[int] | None = None,
-    competitive_context: str | None = None,
 ) -> dict:
     """
-    Run selected evaluators then synthesize with minimum scores.
-    evaluator_indices: which of the 3 evaluators to use (default all).
+    Run a single combined evaluator against the page and criteria list.
 
     Returns dict with keys:
-        evaluations  — list of (name, raw_text) per selected evaluator
-        synthesis    — synthesis text (markdown table + paragraph + FIX blocks)
-        total_score  — int parsed from synthesis TOTAL line, or None
+        evaluations  — list with one entry: [("Evaluator", raw_text)]
+        synthesis    — same as raw_text (no separate synthesis step)
+        total_score  — int parsed from evaluation TOTAL line, or None
         max_score    — int (n_criteria * 3)
+        score_parse_method — "text" or "failed"
     """
-    if evaluator_indices is None:
-        evaluator_indices = list(range(len(_EVALUATOR_SPECS)))
-
-    selected_specs = [_EVALUATOR_SPECS[i] for i in evaluator_indices]
     criteria_text = format_criteria_list(criteria)
     max_score = len(criteria) * 3
     user_msg = prompts.EVALUATOR_USER.format(criteria=criteria_text, html=html_content)
-    if competitive_context:
-        user_msg = (
-            "COMPETITOR REFERENCE — use this to check any exclusions about copied language or patterns:\n"
-            f"{competitive_context}\n\n"
-            + user_msg
-        )
 
-    evaluations = []
-    for name, system in selected_specs:
-        if on_progress:
-            on_progress(f"{name} evaluating...")
-        response = _call_claude(client, system, user_msg, max_tokens=1500, stats=stats)
-        evaluations.append((name, _text(response)))
+    if on_progress:
+        on_progress("Evaluating...")
+    response = _call_claude(client, prompts.EVALUATOR_SYSTEM, user_msg, max_tokens=2000, stats=stats)
+    eval_text = _text(response)
 
-    if len(evaluations) == 1:
-        # Single evaluator — no synthesis call needed; use the evaluation directly
-        synthesis_text = evaluations[0][1]
-    else:
-        if on_progress:
-            on_progress("Synthesizing evaluations...")
-        eval_blocks = "\n\n".join(
-            f"EVALUATOR {i + 1} — {name}:\n{text}"
-            for i, (name, text) in enumerate(evaluations)
-        )
-        synthesis_msg = (
-            eval_blocks
-            + "\n\nProduce the synthesis as specified in your instructions. "
-            "Use minimum scores per criterion. Calculate the total from minimum scores only."
-        )
-        synthesis_response = _call_claude(
-            client, prompts.EVALUATOR_SYNTHESIS_SYSTEM, synthesis_msg, max_tokens=2000, stats=stats
-        )
-        synthesis_text = _text(synthesis_response)
-
-    parsed_score = _parse_score(synthesis_text)
-    if parsed_score is not None:
-        total_score = parsed_score
-        parse_method = "text"
-    else:
-        total_score = _sum_min_scores(evaluations)
-        parse_method = "fallback_sum" if total_score is not None else "failed"
+    total_score = _parse_score(eval_text)
+    parse_method = "text" if total_score is not None else "failed"
 
     return {
-        "evaluations": evaluations,
-        "synthesis": synthesis_text,
+        "evaluations": [("Evaluator", eval_text)],
+        "synthesis": eval_text,
         "total_score": total_score,
         "max_score": max_score,
         "score_parse_method": parse_method,
@@ -471,23 +449,6 @@ def _parse_score(evaluation_text: str) -> Optional[int]:
     if m:
         return int(m.group(1))
     return None
-
-
-def _sum_min_scores(evaluations: list[tuple[str, str]]) -> Optional[int]:
-    """
-    Fallback scorer: for each criterion, take the minimum score across all
-    evaluators and sum them. Reliable when the synthesis total cannot be parsed.
-    """
-    from collections import defaultdict
-    criterion_scores: dict[int, list[int]] = defaultdict(list)
-    for _, eval_text in evaluations:
-        for row in parse_evaluation_rows(eval_text):
-            cnum = int(row["Criterion"])
-            score = int(row["Score"].split("/")[0])
-            criterion_scores[cnum].append(score)
-    if not criterion_scores:
-        return None
-    return sum(min(scores) for scores in criterion_scores.values())
 
 
 def parse_evaluation_rows(evaluation_text: str) -> list[dict]:

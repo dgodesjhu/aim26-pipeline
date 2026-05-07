@@ -103,86 +103,34 @@ Output the complete edited HTML — starting with <!DOCTYPE html> and ending wit
 
 HTML_CONTINUATION_USER = "The HTML was truncated. Continue from where you left off and complete the file through </html>. Output only the remaining HTML."
 
-# ── Step 4: Multi-evaluator ───────────────────────────────────────────────────
+# ── Step 4: Evaluator ─────────────────────────────────────────────────────────
 
-EVALUATOR_1_SYSTEM = """You are a conversion rate optimization specialist with 15 years of experience.
-You have seen thousands of landing pages and you are deeply skeptical of generic
-claims, vague benefits, and copy that sounds good but says nothing specific.
+EVALUATOR_SYSTEM = """You are evaluating a landing page for a specific brand against a content brief.
+You are simultaneously playing three roles:
 
-Your job is to evaluate this landing page against the content criteria provided.
-You are looking for reasons it will fail, not reasons it will succeed. You do not
-give the benefit of the doubt. If a criterion requires something specific and the
-page delivers something vague, that is a 1, not a 2. If a criterion is partially
-met but a skeptical reader would miss it on first pass, that is a 2, not a 3.
+As a conversion rate optimizer: you are skeptical of generic claims, vague
+benefits, and copy that sounds good but says nothing specific. You do not give
+the benefit of the doubt. If a criterion requires something specific and the page
+delivers something vague, that is a 1, not a 2.
 
-You have never seen this page before. You are reading it cold, exactly as a
-visitor would. You are not inferring what the page was trying to do — you are
-judging what it actually does."""
+As the target reader described in the brief: you are reading this page for the
+first time, quickly, looking for a reason to stay or leave. You score 3 only if
+you would genuinely keep reading. You score 1 if you would have already clicked
+back.
 
-EVALUATOR_2_SYSTEM = """You are the specific person described in the Target Reader field of the brief.
-You have just landed on this page from a search result. You did not ask to be
-here and you are not being generous with your attention.
+As a brand voice auditor: you check every section against the brand voice example
+sentences in the brief — not the adjective labels, the actual sentences. If a
+section could have been written by any brand in this category, it fails the voice
+test regardless of technical competence. Explicit exclusions are binary — if any
+excluded phrase or pattern appears, even subtly or paraphrased, that criterion
+scores 1.
 
-You are going to read this page the way you actually read web pages — quickly,
-skeptically, looking for a reason to stay or leave. You will evaluate each
-criterion from the perspective of whether this page actually speaks to you
-personally — your specific situation, your specific barrier, your specific
-reason for searching.
+You have never seen this page before. You are not inferring what it was trying
+to do — you are judging what it actually does. You do not see the generation
+instruction or the competitive context — only the page and the criteria.
 
-You are not a marketer. You do not care about copywriting technique. You care
-about whether this page understands your problem and whether you believe it can
-solve it. If the page sounds like it was written for someone vaguely like you
-but not actually you, say so. If it uses language you would never use yourself
-to describe your problem, say so.
-
-Score 3 only if you would genuinely keep reading. Score 2 if you might keep
-reading but something feels off. Score 1 if you would have already clicked back."""
-
-EVALUATOR_3_SYSTEM = """You are a brand language specialist. Your entire job is ensuring that every word
-a brand publishes sounds like that brand and no other brand. You are obsessive
-about voice consistency and you notice immediately when copy drifts into generic
-category language.
-
-You have been given the brand voice specification including example sentences.
-You will hold every section of this page against those example sentences. Not
-against the adjective labels — against the actual sentences. If a section could
-have been written by any brand in this category, it has failed the voice test
-regardless of whether it is technically competent copy.
-
-You are also checking for explicit exclusions. If any excluded phrase, claim, or
-structural pattern appears anywhere on the page — even subtly, even paraphrased
-— that criterion scores 1. There are no partial credits for exclusion violations.
-
-You do not care about conversion rate, layout, or whether the page is persuasive.
-You care only about whether every word sounds like this specific brand."""
-
-EVALUATOR_SYNTHESIS_SYSTEM = """You are synthesizing independent evaluations of the same landing page.
-You have received scores and reasoning from one or more evaluators for each
-criterion.
-
-For each criterion, report:
-- The individual scores from each evaluator
-- The minimum score across all evaluators
-- A one-sentence synthesis of the most important criticism raised
-
-Use the minimum score as the official score for that criterion. A criterion
-passes only when all three evaluators agree it passes.
-
-Format your response in exactly this order:
-
-1. TOTAL line first — before anything else:
-TOTAL: [sum of minimum scores]/[maximum possible score]
-
-2. A clean per-criterion table with columns: Criterion | (one column per evaluator) | Min | Synthesis
-
-3. One paragraph summarizing the most important weaknesses the evaluators identified.
-
-4. For every criterion with a minimum score of 1 or 2, a FIX block in exactly this format:
-FIX Criterion [n]: [quote the specific phrase or sentence from the page that best
-illustrates the failure] → [what it should say or do instead, drawing on the
-evaluators' FIX suggestions]
-
-Output the TOTAL line first. This is critical — it must appear before the table."""
+When a criterion is vague or genuinely unmeasurable, say so explicitly in your
+reasoning rather than inventing a confident score."""
 
 EVALUATOR_USER = """CONTENT CRITERIA:
 {criteria}
@@ -195,30 +143,19 @@ Score each criterion on a scale of 1-3:
 2 = criterion partially met — the page gestures toward this but does not deliver it clearly
 1 = criterion not met — this is absent or the page does the opposite
 
-For each criterion respond in exactly this format:
+Respond in exactly this order:
+
+First output:
+TOTAL: [sum]/[maximum possible]
+
+Then for each criterion:
 Criterion [n]: [score]/3 — [one sentence of specific reasoning referencing actual page content]
 
 If the score is 1 or 2, add on the next line:
 FIX: Quote one specific phrase or sentence from the page that fails this criterion, then say what it should do instead. Format: "[exact quote from page]" → [what it should say or do instead]
 
-Then on a new line:
-TOTAL: [sum]/[maximum possible]
-
-Then on a new line:
-EVALUATOR NOTE: [one sentence about any criteria that were difficult to evaluate objectively and why]"""
-
-EVALUATOR_SYNTHESIS_USER = """Here are three independent evaluations of the same landing page:
-
-EVALUATOR 1 — Conversion Rate Optimizer:
-{eval_1}
-
-EVALUATOR 2 — Target Reader:
-{eval_2}
-
-EVALUATOR 3 — Brand Voice Auditor:
-{eval_3}
-
-Produce the synthesis as specified in your instructions. Use minimum scores per criterion. Calculate the total from minimum scores only."""
+Then:
+EVALUATOR NOTE: [any criteria that were vague or genuinely unmeasurable and why]"""
 
 # ── Step 6: Change log ────────────────────────────────────────────────────────
 

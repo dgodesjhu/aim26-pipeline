@@ -147,28 +147,39 @@ def _parse_tab_brief(text: str) -> dict:
             label = parts[0].strip().rstrip("*").strip().lower()
             immediate = parts[1].strip()
 
+            if not label:
+                # Empty label = tab-prefixed continuation (\tContent).
+                if current and immediate:
+                    raw[current].append(immediate)
+                continue
+
             # Resolve alias; try exact then partial match
             canonical = _TAB_ALIASES.get(label)
-            if canonical is None and label not in _TAB_ALIASES:
+            recognized = label in _TAB_ALIASES
+            if not recognized:
                 for key, val in _TAB_ALIASES.items():
                     if key and key in label:
                         canonical = val
+                        recognized = True
                         break
 
-            current = canonical  # None = ignored field
-            if current and immediate:
-                raw[current].append(immediate)
+            if recognized:
+                # Known field or explicitly ignored — update current
+                current = canonical
+                if current and immediate:
+                    raw[current].append(immediate)
+            else:
+                # Unrecognized label: the line is student content with an
+                # embedded tab (e.g. a criterion bullet with a tab stop).
+                # Treat the whole line as content for the current field.
+                if current:
+                    raw[current].append(line.replace("\t", " ").strip())
         elif current and line.strip():
             raw[current].append(line.strip())
 
     result = {}
     for field in ALL_FIELDS:
-        lines = raw.get(field, [])
-        if field == "Brand":
-            # Brand name is always the first non-empty line only
-            value = lines[0].strip() if lines else ""
-        else:
-            value = "\n".join(lines).strip()
+        value = "\n".join(raw.get(field, [])).strip()
         if field in ("Content criteria", "Explicit exclusions"):
             result[field] = _parse_list(value) if value else []
         else:
@@ -227,3 +238,62 @@ def format_criteria_list(criteria: list[str]) -> str:
 def format_exclusions_list(exclusions: list[str]) -> str:
     """Return a bulleted string suitable for inclusion in a prompt."""
     return "\n".join(f"- {e}" for e in exclusions)
+
+
+# Substrings that identify template hint/instruction text to strip from student briefs.
+_HINT_PHRASES = [
+    # Universal instruction markers
+    "copy from",
+    "one action only",
+    "not a demographic",
+    "each must be checkable",
+    "the exact keyword from",
+    "what action do you want",
+    "yes/no checklist",
+    "checklist for",
+    "each item below",
+    # Field-specific hint openers
+    "3 adjectives describing",          # Brand voice
+    "2-3 consistent patterns",           # Competitive insights
+    "2-3 specific phrases",              # Explicit exclusions
+    "list sections in order",            # Page sections
+    "where is this reader",              # Customer journey moment
+    "2-3 gaps",                          # Competitive gaps
+]
+
+
+def _is_hint(text: str) -> bool:
+    lo = text.lower()
+    return any(phrase in lo for phrase in _HINT_PHRASES)
+
+
+def preprocess_brief(parsed: dict) -> tuple[dict, dict]:
+    """
+    Remove template hint/instruction text from every field in a parsed brief.
+
+    Returns (cleaned, removed) where:
+      cleaned  — copy of parsed with hint lines/items stripped
+      removed  — {field: [dropped strings]} for any field that lost content
+    """
+    cleaned: dict = {}
+    removed: dict = {}
+
+    for field, value in parsed.items():
+        if isinstance(value, list):
+            kept = [item for item in value if not _is_hint(item)]
+            dropped = [item for item in value if _is_hint(item)]
+            cleaned[field] = kept
+            if dropped:
+                removed[field] = dropped
+        else:
+            kept_lines = [ln for ln in value.splitlines() if not _is_hint(ln)]
+            dropped_lines = [ln for ln in value.splitlines() if _is_hint(ln)]
+            result_str = "\n".join(kept_lines).strip()
+            # Brand is a single name — take only the first non-empty line after cleaning.
+            if field == "Brand":
+                result_str = next((ln.strip() for ln in kept_lines if ln.strip()), "")
+            cleaned[field] = result_str
+            if dropped_lines:
+                removed[field] = dropped_lines
+
+    return cleaned, removed
