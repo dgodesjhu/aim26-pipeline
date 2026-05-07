@@ -83,23 +83,38 @@ Output a single complete HTML file with embedded CSS. Use a clean, modern design
 Output only the HTML — starting with <!DOCTYPE html> and ending with </html>."""
 
 HTML_EDIT_SYSTEM = """You are an expert conversion copywriter and front-end developer.
-You edit existing HTML landing pages to fix specific evaluation failures.
-Output only valid HTML — no explanation, no commentary, no markdown code fences."""
+You make surgical, targeted edits to fix specific evaluation failures in an existing HTML landing page.
+You output only patch blocks — not the full page."""
 
-HTML_EDIT_INSTRUCTION = """The landing page for {brand_name} has been evaluated and has specific failures. Edit it to fix only those failures.
+HTML_EDIT_INSTRUCTION = """The landing page for {brand_name} has been evaluated and has specific failures. Output targeted patches to fix only those failures.
 
 EVALUATION FEEDBACK:
 {feedback_text}
 
 Rules:
 - Fix ONLY what the feedback identifies as failing (score 1 or 2)
-- Do not change, reorder, or restructure sections that scored 3
-- Do not introduce new problems while fixing the identified ones
-- Preserve all page sections, the overall structure, and everything that is working
+- Do not touch sections that scored 3
+- Do not introduce new problems while fixing identified ones
 
-For any brand voice fixes: apply the competitor test to every sentence you rewrite — "Could this sentence appear on a competitor's page?" If yes, rewrite again. Replace generic language with copy that uses the specific vocabulary, directness, and sentence structure of the brand voice examples in the brief.
+For brand voice fixes: apply the competitor test — "Could this sentence appear on a competitor's page?" If yes, rewrite again.
 
-Output the complete edited HTML — starting with <!DOCTYPE html> and ending with </html>."""
+Output ONLY patch blocks in this exact format. One block per change:
+
+PATCH 1
+FIND:
+[copy the exact text from the page — must be character-perfect, including surrounding tags]
+REPLACE:
+[the replacement text]
+END PATCH
+
+PATCH 2
+FIND:
+[next exact text to find]
+REPLACE:
+[replacement]
+END PATCH
+
+Critical: the FIND text must be copied exactly as it appears in the HTML — do not paraphrase, reformat, or abbreviate it. Output only PATCH blocks, no other text."""
 
 HTML_CONTINUATION_USER = "The HTML was truncated. Continue from where you left off and complete the file through </html>. Output only the remaining HTML."
 

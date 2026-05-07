@@ -297,6 +297,31 @@ def _doc_block(text: str, title: str, context: str) -> dict:
     }
 
 
+def _apply_patches(html: str, patch_text: str) -> tuple[str, int, int]:
+    """
+    Parse PATCH blocks from patch_text and apply them to html via exact string replacement.
+    Returns (patched_html, patches_applied, patches_failed).
+    Skips any patch whose FIND text is not found verbatim in the current html.
+    """
+    pattern = re.compile(
+        r"PATCH\s+\d+\s*\nFIND:\s*\n(.*?)\nREPLACE:\s*\n(.*?)\nEND PATCH",
+        re.DOTALL,
+    )
+    patches = pattern.findall(patch_text)
+    applied = 0
+    failed = 0
+    result = html
+    for find_text, replace_text in patches:
+        find_text = find_text.strip()
+        replace_text = replace_text.strip()
+        if find_text and find_text in result:
+            result = result.replace(find_text, replace_text, 1)
+            applied += 1
+        else:
+            failed += 1
+    return result, applied, failed
+
+
 def run_html_generation(
     client: anthropic.Anthropic,
     brief_text: str,
@@ -309,11 +334,11 @@ def run_html_generation(
     """
     Generate or edit HTML.
     - First iteration: full generation from brief + competitive summary.
-    - Subsequent iterations: targeted edit of previous_html guided by latest_feedback.
+    - Subsequent iterations: surgical FIND/REPLACE patches applied to previous_html.
     Returns (html_string, output_token_count).
     """
     if previous_html and latest_feedback:
-        # Edit mode — fix only the failures identified in the latest evaluation
+        # Edit mode — apply surgical patches to the existing page
         instruction = prompts.HTML_EDIT_INSTRUCTION.format(
             brand_name=brand_name,
             feedback_text=latest_feedback,
@@ -331,28 +356,36 @@ def run_html_generation(
             ),
             {"type": "text", "text": instruction},
         ]
-        system = prompts.HTML_EDIT_SYSTEM
-    else:
-        # Generation mode — build page from scratch
-        instruction = prompts.HTML_GENERATION_INSTRUCTION.format(brand_name=brand_name)
-        user_content = [
-            _doc_block(
-                brief_text,
-                title="Content Brief",
-                context="The content brief for this landing page — brand, audience, goals, criteria, and page sections.",
-            ),
-            _doc_block(
-                competitive_summary,
-                title="Competitive Analysis Summary",
-                context="Patterns, gaps, and structural observations from competitor pages in this category.",
-            ),
-            {"type": "text", "text": instruction},
-        ]
-        system = prompts.HTML_GENERATION_SYSTEM
+        response = _call_claude(
+            client,
+            prompts.HTML_EDIT_SYSTEM,
+            "",
+            max_tokens=2000,
+            stats=stats,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        patch_text = _text(response)
+        patched_html, _applied, _failed = _apply_patches(previous_html, patch_text)
+        return patched_html, response.usage.output_tokens
 
+    # Generation mode — build full page from scratch
+    instruction = prompts.HTML_GENERATION_INSTRUCTION.format(brand_name=brand_name)
+    user_content = [
+        _doc_block(
+            brief_text,
+            title="Content Brief",
+            context="The content brief for this landing page — brand, audience, goals, criteria, and page sections.",
+        ),
+        _doc_block(
+            competitive_summary,
+            title="Competitive Analysis Summary",
+            context="Patterns, gaps, and structural observations from competitor pages in this category.",
+        ),
+        {"type": "text", "text": instruction},
+    ]
     response = _call_claude(
         client,
-        system,
+        prompts.HTML_GENERATION_SYSTEM,
         "",
         max_tokens=8000,
         stats=stats,
@@ -361,13 +394,13 @@ def run_html_generation(
     html = _text(response)
     token_count = response.usage.output_tokens
 
-    # Continuation loop — up to 3 extra calls, each with full conversation context
+    # Continuation loop — up to 3 extra calls if output was truncated
     for _ in range(3):
         if _is_complete_html(html):
             break
         cont_response = _call_claude(
             client,
-            system,
+            prompts.HTML_GENERATION_SYSTEM,
             "",
             max_tokens=8000,
             stats=stats,
