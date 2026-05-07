@@ -273,7 +273,7 @@ def run_competitive_analysis(
         client,
         prompts.COMPETITIVE_ANALYSIS_SYSTEM,
         user_msg,
-        max_tokens=1000,
+        max_tokens=800,
         stats=stats,
     )
     return _text(response)
@@ -408,7 +408,7 @@ def run_evaluation(
 
     if on_progress:
         on_progress("Evaluating...")
-    response = _call_claude(client, prompts.EVALUATOR_SYSTEM, user_msg, max_tokens=2000, stats=stats)
+    response = _call_claude(client, prompts.EVALUATOR_SYSTEM, user_msg, max_tokens=600, stats=stats)
     eval_text = _text(response)
 
     total_score = _parse_score(eval_text)
@@ -495,7 +495,7 @@ def run_change_log(
         client,
         prompts.CHANGE_LOG_SYSTEM,
         user_msg,
-        max_tokens=1500,
+        max_tokens=800,
         stats=stats,
     )
     return _text(response)
