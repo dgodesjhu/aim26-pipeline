@@ -174,8 +174,21 @@ def _parse_tab_brief(text: str) -> dict:
                 # Treat the whole line as content for the current field.
                 if current:
                     raw[current].append(line.replace("\t", " ").strip())
-        elif current and line.strip():
-            raw[current].append(line.strip())
+        elif line.strip():
+            # Check if this no-tab line is a bare field label (e.g. "Brand *")
+            label_only = line.strip().rstrip("*").strip().lower()
+            canonical = _TAB_ALIASES.get(label_only)
+            recognized = label_only in _TAB_ALIASES
+            if not recognized:
+                for key, val in _TAB_ALIASES.items():
+                    if key and key in label_only:
+                        canonical = val
+                        recognized = True
+                        break
+            if recognized:
+                current = canonical
+            elif current:
+                raw[current].append(line.strip())
 
     result = {}
     for field in ALL_FIELDS:
